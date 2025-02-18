@@ -1,0 +1,41 @@
+# Experiment Args
+exp_name: "exp-qwen0.5b-r1-zero-example"
+
+logging_methods: ["tensorboard"]
+wandb_project: ""
+wandb_entity: ""
+
+# Dataset Args
+dataset_name_or_path: "openai/gsm8k"
+tokenized_dataset_path: "./data/openai/gsm8k_tokenized_for_qwen2.5_0.5b_oneshot"
+overwrite_preprocess: true
+
+# Preprocessing Args
+batch_size_for_preproc: 3000
+num_proc_for_preproc: 8
+
+# Model Args
+model_name_or_path: "Qwen/Qwen2.5-0.5B"
+
+# Training Args
+max_length: 340 
+num_train_epochs: 30
+num_warmup_steps: 100
+learning_rate: 1.e-7
+lr_scheduler_type: "cosine"
+max_grad_value: 1.0
+train_batch_size_per_proc: 2
+eval_batch_size_per_proc: 3
+gradient_accumulation_steps: 1
+
+# GRPO Args
+rollout_per_sample: 3
+rollout_temperature: 0.5
+rollout_max_tokens: 384
+kl_coef: 0.01
+
+# Logging and Saving Args
+eval_interval: 32
+log_interval: 1
+save_interval: 160
+save_dir: './ckpts/exp-qwen0.5b-r1-zero-example'
