@@ -1,15 +1,15 @@
 # Simple-R1
 
-A **hackable, simple, and efficient** DeepSeek R1-Zero Reproduction framework with high speed weight synchronization between multinode environment.
+A **hackable, simple, and efficient** DeepSeek R1-Zero Reproduction with high speed weight synchronization in a multinode environment.
 
 ## Features
 
-- **High-Speed Weight Synchronization between Training Process and Inference Workers**  
-  Unlike traditional RLHF frameworks (e.g., Open-R1), which combine training and inference within a single process—leading to high memory overhead—**Simple-R1 decouples inference from training**.  
+- **High-Speed Weight Synchronization between Training Process and Inference Workers**
+  Unlike traditional RLHF frameworks (e.g., Open-R1), which combine training and inference within a single process—leading to high memory overhead—**Simple-R1 decouples inference from training**.
   We achieve **extremely fast weight updates** for vLLM-based inference workers via **direct NCCL communication** among distributed nodes.
-- Simple-R1 leverages Ray serve for **high-speed inference**.  
-  Ray serve is a high-performance, scalable, and providides load-balancing for inference workers.  
-  Simple-R1 uses Ray serve to **efficiently serve vLLM-based models**.
+- **High-Performance Inference with Ray Serve**
+  Ray Serve is a high-performance, scalable serving framework that provides load balancing for inference workers.
+  We use Ray Serve to efficiently sample generated text from vLLM.
 - **Hackable**: No Hugging Face Trainer. You can fully customize your training loop.
 - **Simple**: Minimal abstraction, minimal files, minimal dependencies.
 
