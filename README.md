@@ -13,12 +13,18 @@ A **hackable, simple, and efficient** DeepSeek R1-Zero Reproduction with high sp
 - **Hackable**: No Hugging Face Trainer. You can fully customize your training loop.
 - **Simple**: Minimal abstraction, minimal files, minimal dependencies.
 
+## Architecture
+![sample_generation_using_ray_server_and_vllm](res/imgs/sample_generation_using_ray_server_and_vllm.png)
+![weight_synchronization](res/imgs/weight_synchronization.png)
+
+
 ## TODO
 - [X] Implement a basic training loop to reproduce for DeepSeek R1-Zero.
 - [X] Implement high-speed weight synchronization using NCCL between training and inference nodes.
 - [ ] Improve code readability, enhance documentation, and refactor the code.
 - [ ] Test distributed training with multiple training and inference nodes.
 - [ ] Test and support large models.
+
 
 
 ## R1 Zero Simple Reproduction
