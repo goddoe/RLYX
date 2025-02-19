@@ -237,7 +237,7 @@ def main():
     handle = serve.get_deployment_handle("InferenceWorker",
                                          app_name="default")
 
-    print(f"result: {handle.generate_text.remote(["hello"]).result()}")
+    print(f"result: {handle.generate_text.remote(['hello']).result()}")
 
     num_infer_workers = -1
     model_update_group = None
@@ -269,9 +269,6 @@ def main():
     accelerator.wait_for_everyone()
 
     global_i = 0
-    best_valid_loss = 9e9
-    global_valid_loss = 9e9
-
     os.makedirs(exp_args.save_dir, exist_ok=True)
     model.train()
     pbar = tqdm(range(num_training_steps), total=num_training_steps)
@@ -308,11 +305,6 @@ def main():
                         curr_sample_reward_list = []
                         for l, reward_func in enumerate(reward_func_list):
                             reward = reward_func(text_compl_sample, solution=solution)
-                            if reward > 0:
-                                print("*"*30)
-                                print(f"reward_func: {reward_func.__name__}, reward: {reward}")
-                                print(f"text_compl_sample: {text_compl_sample}")
-                                print("*"*30)
                             curr_sample_reward_list.append(reward)
                         curr_compl_reward_list.append(curr_sample_reward_list)
                     reward_list.append(curr_compl_reward_list)
@@ -367,22 +359,6 @@ def main():
 
                 logits_to_keep = completion_ids[0].size(1)
 
-                print("*"*60)
-                for item_list in prompt_completion_ids:
-                    for item in item_list:
-                        t = tokenizer.decode(item.cpu().tolist(),
-                                             skip_special_tokens=True)
-                        print("-"*30)
-                        print(t)
-
-                print("="*60)
-                for item_list in completion_ids:
-                    for item in item_list:
-                        t = tokenizer.decode(item.cpu().tolist(),
-                                             skip_special_tokens=True)
-                        print("-"*30)
-                        print(t)
-
                 # [batch_size * rollout_per_sample, max_length]
                 flatten_prompt_completion_ids = prompt_completion_ids.view(batch_size * rollout_per_sample, -1)
 
@@ -412,18 +388,6 @@ def main():
                 # It is equivalent to updating the old policy model at every step.
                 # [batch_size * rollout_per_sample, max_length]
                 per_token_loss = torch.exp(policy_per_token_logps - policy_per_token_logps.detach()) * advantages.view(-1, 1)
-
-                if accelerator.is_main_process:
-                    print("*"*30)
-                    print("per_token_kl")
-                    print(per_token_kl[:4, :4])
-                    print("*"*30)
-                    print("policy_per_token_logps")
-                    print(policy_per_token_logps[:4, :4])
-                    print("*"*30)
-                    print("per_token_loss")
-                    print(per_token_loss[:4, :4])
-                    print("*"*30)
 
                 # Working version... However, I have no idea why it works
                 # I think I need to multiply -1. to per_token_loss. Weird... 
@@ -491,7 +455,8 @@ def main():
                         curr_reward_mean = torch.sum(all_rewards) / torch.numel(all_rewards)
                         reward_func_to_reward_map[reward_func_name] = curr_reward_mean.item()
 
-                    metrics = {"global_step": global_i,
+                    metrics = {"epoch": epoch,
+                               "global_step": global_i,
                                "reward_mean": global_reward_mean,
                                "train_loss": global_train_loss,
                                "lr": lr_scheduler.get_last_lr()[0],
@@ -500,6 +465,8 @@ def main():
                                 **reward_func_to_reward_map
                                }
 
+                    print(metrics)
+
                     if is_wandb_logging:
                         wandb.log(metrics)
 
@@ -507,12 +474,14 @@ def main():
                         for k, v in metrics.items():
                             tb_writer.add_scalar(f"train/{k}", v, global_i)
 
-                desc = (f"global_step: {global_i}, "
-                        f"epoch: {epoch}, reward_mean: {global_reward_mean:0.4f}, "
-                        f"train_loss: {global_train_loss:0.4f}, "
-                        f"best_valid_loss: {global_valid_loss:0.4f}, "
-                        f"recent_valid_loss: {best_valid_loss:0.4f}")
-                accelerator.print(desc)
+                    print("="*60)
+                    for item_list in completion_ids:
+                        for item in item_list:
+                            sample_completion = tokenizer.decode(item.cpu().tolist(),
+                                                 skip_special_tokens=True)
+                            print(sample_completion)
+                            print("-"*30)
+
 
 
             if accelerator.is_main_process and global_i % exp_args.eval_interval == 0:
@@ -583,8 +552,8 @@ def main():
                 within_tolerance_accuracy = n_within_tolerance_correct / n_total
 
                 metrics = {
-                    "gsm8k_accuracy_exact_trunc": exact_accuracy,
-                    "gsm8k_accuracy_within_tolerance_trunc": within_tolerance_accuracy,
+                    f"gsm8k_accuracy_exact_{eval_sample}s": exact_accuracy,
+                    f"gsm8k_accuracy_within_tolerance_{eval_sample}s": within_tolerance_accuracy,
                 }
                 
                 if is_wandb_logging:
@@ -596,8 +565,8 @@ def main():
 
                 accelerator.print(
                     f"global_step: {global_i}, epoch: {epoch}, "
-                    f"gsm8k_accuracy_exact: {exact_accuracy:0.4f}, "
-                    f"gsm8k_accuracy_within_tolerance: {within_tolerance_accuracy:0.4f}"
+                    f"gsm8k_accuracy_exact_{eval_sample}s: {exact_accuracy:0.4f}, "
+                    f"gsm8k_accuracy_within_tolerance_{eval_sample}s: {within_tolerance_accuracy:0.4f}"
                 )
 
             accelerator.wait_for_everyone()
