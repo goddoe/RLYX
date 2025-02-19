@@ -1,10 +1,10 @@
 import re
 import pickle
 from copy import deepcopy
+
+import ray
 import yaml
 import torch
-import ray
-import numpy as np
 from ray.util.state import list_actors
 from ray.serve._private.common import RequestMetadata
 
@@ -14,8 +14,9 @@ def read_config(config_path):
         config = yaml.safe_load(f)
     return config
 
-def stateless_init_process_group(master_address, master_port, rank, world_size,
-                                 device):
+
+def stateless_init_process_group(master_address, master_port,
+                                 rank, world_size, device):
     """
     vLLM provides `StatelessProcessGroup` to create a process group
     without considering the global process group in torch.distributed.
@@ -33,7 +34,8 @@ def stateless_init_process_group(master_address, master_port, rank, world_size,
     return pynccl
 
 
-def get_all_inference_actors(class_name='InferenceWorker', state='ALIVE') -> list[ray.actor.ActorHandle]:
+def get_all_inference_actors(class_name='InferenceWorker', state='ALIVE'
+                             ) -> list[ray.actor.ActorHandle]:
     actor_state_list = []
 
     for actor in list_actors():
@@ -50,8 +52,7 @@ def get_all_inference_actors(class_name='InferenceWorker', state='ALIVE') -> lis
 
 def call_func_using_actor_handle(actor_handle: ray.actor.ActorHandle,
                                  method_name: str,
-                                 *method_args,
-                                 **method_kwargs) -> ray.ObjectRef:
+                                 *method_args, **method_kwargs) -> ray.ObjectRef:
     request_metadata = RequestMetadata(
         request_id="dummy",
         internal_request_id="dummy",
@@ -123,11 +124,10 @@ def get_per_token_logps(model, input_ids, attention_mask, logits_to_keep):
     # return torch.stack(per_token_logps)
 
     token_logits = logits.gather(dim=-1, index=input_ids.unsqueeze(-1)).squeeze(-1)
-    logsumexp_values = torch.stack([torch.logsumexp(lg, dim=-1) for lg in logits])  # loop to reduce memory peak
+    logsumexp_values = torch.stack([torch.logsumexp(lg, dim=-1)
+                                    for lg in logits])  # loop to reduce memory peak
     token_log_probs = token_logits - logsumexp_values  # log_softmax = logits - log(sum(exp(logits)))
     return token_log_probs
-
-
 
 
 def selective_log_softmax(logits, index):
@@ -150,7 +150,8 @@ def selective_log_softmax(logits, index):
             Gathered log probabilities with the same shape as `index`.
     """
     if logits.dtype in [torch.float32, torch.float64]:
-        selected_logits = torch.gather(logits, dim=-1, index=index.unsqueeze(-1)).squeeze(-1)
+        selected_logits = torch.gather(logits, dim=-1,
+                                       index=index.unsqueeze(-1)).squeeze(-1)
         # loop to reduce peak mem consumption
         logsumexp_values = torch.stack([torch.logsumexp(lg, dim=-1) for lg in logits])
         per_token_logps = selected_logits - logsumexp_values  # log_softmax(x_i) = x_i - logsumexp(x)
@@ -159,14 +160,16 @@ def selective_log_softmax(logits, index):
         per_token_logps = []
         for row_logits, row_labels in zip(logits, index):  # loop to reduce peak mem consumption
             row_logps = F.log_softmax(row_logits, dim=-1)
-            row_per_token_logps = row_logps.gather(dim=-1, index=row_labels.unsqueeze(-1)).squeeze(-1)
+            row_per_token_logps = (
+                row_logps.gather(dim=-1, index=row_labels.unsqueeze(-1)).squeeze(-1))
             per_token_logps.append(row_per_token_logps)
         per_token_logps = torch.stack(per_token_logps)
     return per_token_logps
 
 
 def create_keyword_mask_from_offsets(tokenizer, input_texts, keywords):
-    tokenized_inputs = tokenizer(input_texts, padding=True, truncation=True, return_tensors="pt", return_offsets_mapping=True)
+    tokenized_inputs = tokenizer(input_texts, padding=True, truncation=True,
+                                 return_tensors="pt", return_offsets_mapping=True)
     token_ids = tokenized_inputs["input_ids"]
     offset_mappings = tokenized_inputs["offset_mapping"]
 
@@ -203,6 +206,7 @@ def extract_numbers(text):
 
     return [float(num) for num in numbers] if numbers else []
 
+
 def compare_numbers(pred, gold, tolerance=1e-5):
     if not pred or not gold:
         return {
@@ -230,7 +234,7 @@ def compare_numbers(pred, gold, tolerance=1e-5):
         "gold":gold
     }
 
+
 def extract_answer(text):
     match = re.search(r"<answer>(.*?)</answer>", text, re.DOTALL)
     return match.group(1) if match else None
-

@@ -1,11 +1,10 @@
 import os
-from starlette.requests import Request
-import ray
-from ray import serve
+
 import torch
-import torch.distributed as dist
+from ray import serve
 from vllm import LLM, SamplingParams
 from vllm.worker.worker import Worker
+from starlette.requests import Request
 
 MODEL_NAME_OR_PATH = os.environ.get("MODEL_NAME_OR_PATH", "Qwen/Qwen2.5-0.5B")
 # MODEL_NAME_OR_PATH = os.environ.get("MODEL_NAME_OR_PATH", "Qwen/Qwen2.5-3B")
@@ -13,6 +12,7 @@ MODEL_NAME_OR_PATH = os.environ.get("MODEL_NAME_OR_PATH", "Qwen/Qwen2.5-0.5B")
 NUM_INFER_WORKERS = os.environ.get("NUM_INFER_WORKERS", 8)
 print(f"MODEL_NAME_OR_PATH: {MODEL_NAME_OR_PATH}")
 print(f"NUM_INFER_WORKERS: {NUM_INFER_WORKERS}")
+
 
 def stateless_init_process_group(master_address, master_port, rank, world_size,
                                  device):

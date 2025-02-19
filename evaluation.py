@@ -1,13 +1,12 @@
 import os
 import json
-import random
 from textwrap import dedent
-import torch
+
+import tqdm
 from datasets import load_dataset
 from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer
 
-import tqdm
 from utils import  extract_answer, extract_numbers, compare_numbers
 
 
@@ -28,9 +27,19 @@ def prepare_tokenizer(model_name_or_path):
     tokenizer.chat_template = chat_template
     return tokenizer
 
+
 def build_gsm8k_input_and_output(tokenizer, question, answer):
-    system_prompt = "A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant first thinks about the reasoning process in the mind and then provides the user with the answer. The reasoning process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think>\n<answer> answer here </answer>"
-    fewshot_question_1 = "Natalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May?"
+    system_prompt = ("A conversation between User and Assistant. "
+                     "The user asks a question, and the Assistant solves it. "
+                     "The assistant first thinks about the reasoning process "
+                     "in the mind and then provides the user with the answer. "
+                     "The reasoning process and answer are enclosed within "
+                     "<think> </think> and <answer> </answer> tags, "
+                     "respectively, i.e., <think> reasoning process here "
+                     "</think>\n<answer> answer here </answer>")
+    fewshot_question_1 = ("Natalia sold clips to 48 of her friends in April, "
+                          "and then she sold half as many clips in May. "
+                          "How many clips did Natalia sell altogether in April and May?")
     fewshot_answer_1 = dedent("""
     <think>
     Natalia sold 48/2 = 24 clips in May.
@@ -43,8 +52,7 @@ def build_gsm8k_input_and_output(tokenizer, question, answer):
     messages = [{"role": "system", "content": system_prompt},
                 {"role": "user", "content": fewshot_question_1},
                 {"role": "assistant", "content": fewshot_answer_1},
-                {"role": "user", "content": question}
-                ]
+                {"role": "user", "content": question}]
     
     input_text = tokenizer.apply_chat_template(messages,
                                                tokenize=False,
@@ -59,6 +67,7 @@ def load_gsm8k(split='test'):
     dataset = load_dataset("gsm8k", "main", split=split)
     return dataset
 
+
 def generate_answer(llm, input_text):
     sampling_params = SamplingParams(max_tokens=1024, # 384
                                      temperature=0.0,
@@ -67,6 +76,7 @@ def generate_answer(llm, input_text):
     outputs = llm.generate([input_text], sampling_params)
     generated_text = outputs[0].outputs[0].text.strip()
     return generated_text
+
 
 def evaluate_gsm8k(model_name_or_path, output_path):
     llm = LLM(model=model_name_or_path)
@@ -117,6 +127,7 @@ def evaluate_gsm8k(model_name_or_path, output_path):
 
     return metrics
 
+
 if __name__ == "__main__":
     from argparse import ArgumentParser
     parser = ArgumentParser()
@@ -127,4 +138,3 @@ if __name__ == "__main__":
 
     if args.task == "gsm8k":
         evaluate_gsm8k(args.model_name_or_path, args.output_path)
-
