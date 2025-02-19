@@ -3,31 +3,40 @@ import time
 import math
 from argparse import ArgumentParser
 from contextlib import nullcontext
-from tqdm import tqdm
+from textwrap import dedent
+from arguments import BaseArgs
+
+import ray
+import wandb
 import numpy as np
 import torch
 import torch.distributed as dist
-from torch.utils.data import DataLoader, DistributedSampler, RandomSampler, SequentialSampler
+from ray import serve
+from tqdm import tqdm
+from dotenv import load_dotenv
 from datasets import load_dataset, load_from_disk
 from transformers import AutoTokenizer, AutoModelForCausalLM, AdamW, get_scheduler
 from accelerate import Accelerator
 from accelerate.utils import DummyOptim, DummyScheduler
-import ray
-from ray import serve
-from textwrap import dedent
-from arguments import BaseArgs
 from torch.utils.tensorboard import SummaryWriter
-import wandb
-from dotenv import load_dotenv
+from torch.utils.data import DataLoader, DistributedSampler, RandomSampler, SequentialSampler
+
 from rewards import format_reward_func, math_reward_func
-from utils import prepare_deepspeed, get_all_inference_actors, call_func_using_actor_handle, stateless_init_process_group, get_per_token_logps, extract_answer, extract_numbers, compare_numbers
+from utils import \
+    prepare_deepspeed, get_all_inference_actors, \
+    call_func_using_actor_handle, stateless_init_process_group, \
+    get_per_token_logps, extract_answer, extract_numbers, compare_numbers
 
 load_dotenv()
 
 
 def main():
     parser = ArgumentParser(description="Train for R1")
-    parser.add_argument("--exp-config-path", type=str, default="./exps/exp_debug/exp_config.yaml", help="Path to the experiment config file")
+    parser.add_argument(
+        "--exp-config-path",
+        type=str, default="./exps/exp_debug/exp_config.yaml",
+        help="Path to the experiment config file"
+    )
     args = parser.parse_args()
     exp_args = BaseArgs.from_yaml(args.exp_config_path)
 
@@ -36,6 +45,7 @@ def main():
     is_deepspeed = accelerator.state.deepspeed_plugin is not None
     accelerator.print("Using DeepSpeed:", is_deepspeed)
 
+    tb_writer = None
     is_wandb_logging = "wandb" in exp_args.logging_methods
     is_tb_logging = "tensorboard" in exp_args.logging_methods
     if accelerator.is_main_process:
@@ -62,10 +72,10 @@ def main():
     chat_template = dedent("""
     {{- eos_token }}
     {%- for message in messages %}
-        {{- '<im_start>' + message['role'] + '\n' + message['content'] + '<im_end>' + '\n' }}
+        {{- "<im_start>" + message["role"] + "\n" + message["content"] + "<im_end>" + "\n" }}
     {%- endfor %}
     {%- if add_generation_prompt %}
-        {{- '<im_start>assistant\n' }}
+        {{- "<im_start>assistant\n" }}
     {%- endif %}""").strip()
     tokenizer.chat_template = chat_template
 
@@ -85,27 +95,32 @@ def main():
         
         new_messages_list = []
         for q, a in zip(examples["question"], examples["answer"]):
-            new_messages = [{"role": "system", "content": system_prompt},
-                            {"role": "user", "content": fewshot_question_1},
-                            {"role": "assistant", "content": fewshot_answer_1},
-                            {"role": "user", "content": q}
-                            ]
+            new_messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": fewshot_question_1},
+                {"role": "assistant", "content": fewshot_answer_1},
+                {"role": "user", "content": q}
+            ]
             new_messages_list.append(new_messages)
             gold_answer_list.append(a.split("####")[-1].strip())
 
         batch = {}
-        batch['gold_answer'] = gold_answer_list
-        batch['solution'] = gold_answer_list
+        batch["gold_answer"] = gold_answer_list
+        batch["solution"] = gold_answer_list
 
-        batch['user_input_ids'] = tokenizer.apply_chat_template(new_messages_list,
-                                                                add_generation_prompt=True,
-                                                                return_tensors="pt",
-                                                                padding=True,
-                                                                truncation=True,
-                                                                max_length=exp_args.max_length).tolist()
-        batch['user_input_text'] = tokenizer.apply_chat_template(new_messages_list,
-                                                                 tokenize=False,
-                                                                 add_generation_prompt=True)
+        batch["user_input_ids"] = tokenizer.apply_chat_template(
+            new_messages_list,
+            add_generation_prompt=True,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=exp_args.max_length
+        ).tolist()
+        batch["user_input_text"] = tokenizer.apply_chat_template(
+            new_messages_list,
+            tokenize=False,
+            add_generation_prompt=True
+        )
 
         return batch
 
@@ -114,12 +129,13 @@ def main():
     # Prepare Dataset
     is_cache_exist = os.path.exists(exp_args.tokenized_dataset_path) 
     if accelerator.is_main_process and (not is_cache_exist or exp_args.overwrite_preprocess):
-        dataset = load_dataset(exp_args.dataset_name_or_path, 'main')
-        tokenized_datasets = dataset.map(tokenize_function,
-                                         batched=True,
-                                         batch_size=exp_args.batch_size_for_preproc,
-                                         num_proc=8
-                                         )
+        dataset = load_dataset(exp_args.dataset_name_or_path, "main")
+        tokenized_datasets = dataset.map(
+            tokenize_function,
+            batched=True,
+            batch_size=exp_args.batch_size_for_preproc,
+            num_proc=8
+        )
         tokenized_datasets.save_to_disk(exp_args.tokenized_dataset_path)
     accelerator.wait_for_everyone()
 
@@ -137,12 +153,12 @@ def main():
         for item in batch:
             for key in keys:
                 data[key].append(item[key])
-        if 'user_input_ids' in data:
-            user_input = tokenizer.pad({"input_ids": data['user_input_ids']},
+        if "user_input_ids" in data:
+            user_input = tokenizer.pad({"input_ids": data["user_input_ids"]},
                                        return_tensors="pt",
                                        padding=True,
-                                       padding_side='left')
-            data['user_input_ids'] = user_input.input_ids
+                                       padding_side="left")
+            data["user_input_ids"] = user_input.input_ids
         return data
 
     train_dataloader = DataLoader(tokenized_datasets["train"],
@@ -175,7 +191,7 @@ def main():
     num_processes = accelerator.num_processes
     accelerator.print("Number of processes (GPUs):", num_processes)
 
-    num_training_steps = math.ceil(len(tokenized_datasets['train']) / (exp_args.train_batch_size_per_proc * num_processes)) * exp_args.num_train_epochs
+    num_training_steps = math.ceil(len(tokenized_datasets["train"]) / (exp_args.train_batch_size_per_proc * num_processes)) * exp_args.num_train_epochs
     accelerator.print("Number of training steps:", num_training_steps)
 
     # Creates Dummy Scheduler if `scheduler` was specified in the config file else creates `args.lr_scheduler_type` Scheduler
@@ -221,8 +237,10 @@ def main():
     handle = serve.get_deployment_handle("InferenceWorker",
                                          app_name="default")
 
-    print(f"result: {handle.generate_text.remote(['hello']).result()}")
+    print(f"result: {handle.generate_text.remote(["hello"]).result()}")
 
+    num_infer_workers = -1
+    model_update_group = None
     # init weight update group
     if accelerator.is_main_process:
         actor_handle_list = get_all_inference_actors()
@@ -236,14 +254,16 @@ def main():
                                          master_address=ray_master_address,
                                          master_port=ray_master_pg_port,
                                          rank=i+1,
-                                         world_size=num_infer_workers+1)
+                                         world_size=num_infer_workers + 1)
             worker_weight_init_handle_list.append(worker_weight_init_handle)
 
-        model_update_group = stateless_init_process_group(ray_master_address,
-                                                          ray_master_pg_port,
-                                                          rank=0,
-                                                          world_size=num_infer_workers+1,
-                                                          device=torch.device("cuda:0"))
+        model_update_group = stateless_init_process_group(
+            ray_master_address,
+            ray_master_pg_port,
+            rank=0,
+            world_size=num_infer_workers + 1,
+            device=torch.device("cuda:0")
+        )
 
         ray.get(worker_weight_init_handle_list)
     accelerator.wait_for_everyone()
@@ -251,7 +271,6 @@ def main():
     global_i = 0
     best_valid_loss = 9e9
     global_valid_loss = 9e9
-    global_train_loss = 9e9
 
     os.makedirs(exp_args.save_dir, exist_ok=True)
     model.train()
@@ -260,30 +279,29 @@ def main():
     accelerator.print("Start training")
     for epoch in range(exp_args.num_train_epochs):
         for batch in train_dataloader:
-            # import pudb; pudb.set_trace()
-            # context = accelerator.accumulate(model) if is_deepspeed else nullcontext()
-            # context = accelerator.accumulate(model)
             context = nullcontext()
             with context:
                 ###############################################################
                 # Rollout
-                sample_params = {'temperature': exp_args.rollout_temperature,
-                                 'max_tokens': exp_args.rollout_max_tokens,
-                                 'n': exp_args.rollout_per_sample,
-                                 'include_stop_str_in_output': True,
-                                 'stop': [stop_token]}
+                sample_params = {"temperature": exp_args.rollout_temperature,
+                                 "max_tokens": exp_args.rollout_max_tokens,
+                                 "n": exp_args.rollout_per_sample,
+                                 "include_stop_str_in_output": True,
+                                 "stop": [stop_token]}
 
-                future_policy_rollout_batch = handle.generate_text.remote(batch['user_input_text'],
-                                                                          sample_params=sample_params)
+                future_policy_rollout_batch = handle.generate_text.remote(
+                    batch["user_input_text"],
+                    sample_params=sample_params
+                )
 
                 policy_rollout_batch = future_policy_rollout_batch.result()
 
-                text_compl_sample_list_batch = policy_rollout_batch['text'] # [batch_size, rollout_per_sample]
+                text_compl_sample_list_batch = policy_rollout_batch["text"] # [batch_size, rollout_per_sample]
                 reward_list = [] # [batch_size, rollout_per_sample, num_reward_func]
 
                 ###############################################################
                 # Calc Reward
-                for j, (text_compl_sample_list, solution) in enumerate(zip(text_compl_sample_list_batch, batch['solution'])):
+                for j, (text_compl_sample_list, solution) in enumerate(zip(text_compl_sample_list_batch, batch["solution"])):
                     curr_compl_reward_list = []  # [rollout_per_sample, num_reward_func]
 
                     for k, text_compl_sample in enumerate(text_compl_sample_list): # [rollout_per_sample]
@@ -311,7 +329,7 @@ def main():
                 advantages = advantages.to(model.device)
                 
                 # [batch_size, rollout_per_sample, not fixed length ] 
-                raw_completion_ids_batch = policy_rollout_batch['token_ids'] 
+                raw_completion_ids_batch = policy_rollout_batch["token_ids"] 
                 
                 ###############################################################
                 # Calc KL divergence
@@ -325,10 +343,12 @@ def main():
                     completion_ids_list.extend(raw_completion_ids)
 
                 # [batch_size * rollout_per_sample, max_length]
-                completion_padded= tokenizer.pad({"input_ids": completion_ids_list},
-                                                  return_tensors="pt",
-                                                  padding=True,
-                                                  padding_side='right')
+                completion_padded= tokenizer.pad({
+                    "input_ids": completion_ids_list},
+                    return_tensors="pt",
+                    padding=True,
+                    padding_side="right"
+                )
                 completion_ids = completion_padded.input_ids
 
                 # [batch_size, rollout_per_sample, max_length]
@@ -336,7 +356,7 @@ def main():
                 completion_ids = completion_ids.to(model.device)
 
                 # [batch_size, max_length]
-                user_input_ids = batch['user_input_ids']
+                user_input_ids = batch["user_input_ids"]
 
                 # [batch_size, rollout_per_sample, max_length]
                 user_input_ids_expanded = user_input_ids.unsqueeze(1).expand(-1, rollout_per_sample, -1)
@@ -350,14 +370,16 @@ def main():
                 print("*"*60)
                 for item_list in prompt_completion_ids:
                     for item in item_list:
-                        t = tokenizer.decode(item.cpu().tolist(), skip_special_tokens=True)
+                        t = tokenizer.decode(item.cpu().tolist(),
+                                             skip_special_tokens=True)
                         print("-"*30)
                         print(t)
 
                 print("="*60)
                 for item_list in completion_ids:
                     for item in item_list:
-                        t = tokenizer.decode(item.cpu().tolist(), skip_special_tokens=True)
+                        t = tokenizer.decode(item.cpu().tolist(),
+                                             skip_special_tokens=True)
                         print("-"*30)
                         print(t)
 
@@ -422,7 +444,7 @@ def main():
 
                 ###############################################################
                 # Update Policy model
-                actor_handle_list = get_all_inference_actors(class_name='InferenceWorker', state='ALIVE')
+                actor_handle_list = get_all_inference_actors(class_name="InferenceWorker", state="ALIVE")
 
                 unwrapped_model = accelerator.unwrap_model(model)
                 if accelerator.is_main_process:
@@ -447,7 +469,7 @@ def main():
             # Logging
             if global_i % exp_args.log_interval == 0:
                 # Collect metrics
-                global_train_loss = accelerator.reduce(train_loss.detach(), reduction='mean').item()
+                global_train_loss = accelerator.reduce(train_loss.detach(), reduction="mean").item()
 
                 # [batch_size * world_size,  rollout_per_sample, num_reward_func] 
                 global_rewards = accelerator.gather_for_metrics(rewards.to(model.device)).detach()
@@ -485,7 +507,11 @@ def main():
                         for k, v in metrics.items():
                             tb_writer.add_scalar(f"train/{k}", v, global_i)
 
-                desc = f"global_step: {global_i}, epoch: {epoch}, reward_mean: {global_reward_mean:0.4f}, train_loss: {global_train_loss:0.4f}, best_valid_loss: {global_valid_loss:0.4f}, recent_valid_loss: {best_valid_loss:0.4f}"
+                desc = (f"global_step: {global_i}, "
+                        f"epoch: {epoch}, reward_mean: {global_reward_mean:0.4f}, "
+                        f"train_loss: {global_train_loss:0.4f}, "
+                        f"best_valid_loss: {global_valid_loss:0.4f}, "
+                        f"recent_valid_loss: {best_valid_loss:0.4f}")
                 accelerator.print(desc)
 
 
@@ -501,16 +527,18 @@ def main():
                     if len(gold_list) > eval_sample:
                         break
                     # inference
-                    gold_list.extend(batch['gold_answer'])
+                    gold_list.extend(batch["gold_answer"])
 
-                    sample_params = {'temperature': 0.1,
-                                     'max_tokens': exp_args.rollout_max_tokens,
-                                     'n': 1,
-                                     'include_stop_str_in_output': True,
-                                     'stop': [stop_token]}
+                    sample_params = {"temperature": 0.1,
+                                     "max_tokens": exp_args.rollout_max_tokens,
+                                     "n": 1,
+                                     "include_stop_str_in_output": True,
+                                     "stop": [stop_token]}
         
-                    future_policy_rollout_batch = handle.generate_text.remote(batch['user_input_text'],
-                                                                              sample_params=sample_params)
+                    future_policy_rollout_batch = handle.generate_text.remote(
+                        batch["user_input_text"],
+                        sample_params=sample_params
+                    )
                     batch_result_list.append(future_policy_rollout_batch)
 
                     if len(batch_result_list) >= num_infer_workers:
@@ -518,7 +546,7 @@ def main():
 
                     for future_policy_rollout_batch in batch_result_list:
                         policy_rollout_batch = future_policy_rollout_batch.result()
-                        for preds in policy_rollout_batch['text']:
+                        for preds in policy_rollout_batch["text"]:
                             pred_raw_list.append(preds[0])
 
                     batch_result_list = []
@@ -526,7 +554,7 @@ def main():
                 if batch_result_list:
                     for future_policy_rollout_batch in batch_result_list:
                         policy_rollout_batch = future_policy_rollout_batch.result()
-                        for preds in policy_rollout_batch['text']:
+                        for preds in policy_rollout_batch["text"]:
                             pred_raw_list.append(preds[0])
 
                 gold_list = gold_list[:eval_sample]
@@ -545,19 +573,20 @@ def main():
                 
                 for pred, gold in zip(pred_list, gold_list):
                     result = compare_numbers(pred, gold)
-                    if result['exact_match']:
+                    if result["exact_match"]:
                         n_exact_correct += 1
-                    if result['within_tolerance']:
+                    if result["within_tolerance"]:
                         n_within_tolerance_correct += 1
 
                 # Calc Accuracy
                 exact_accuracy = n_exact_correct / n_total
                 within_tolerance_accuracy = n_within_tolerance_correct / n_total
 
-                metrics = {"gsm8k_accuracy_exact_trunc": exact_accuracy,
-                           "gsm8k_accuracy_within_tolerance_trunc": within_tolerance_accuracy,
-
-                          }
+                metrics = {
+                    "gsm8k_accuracy_exact_trunc": exact_accuracy,
+                    "gsm8k_accuracy_within_tolerance_trunc": within_tolerance_accuracy,
+                }
+                
                 if is_wandb_logging:
                     wandb.log(metrics)
 
@@ -565,20 +594,26 @@ def main():
                     for k, v in metrics.items():
                         tb_writer.add_scalar(f"valid/{k}", v, global_i)
 
-                accelerator.print(f"global_step: {global_i}, epoch: {epoch}, gsm8k_accuracy_exact: {exact_accuracy:0.4f}, gsm8k_accuracy_within_tolerance: {within_tolerance_accuracy:0.4f}")
+                accelerator.print(
+                    f"global_step: {global_i}, epoch: {epoch}, "
+                    f"gsm8k_accuracy_exact: {exact_accuracy:0.4f}, "
+                    f"gsm8k_accuracy_within_tolerance: {within_tolerance_accuracy:0.4f}"
+                )
 
             accelerator.wait_for_everyone()
 
             if global_i % exp_args.save_interval == 0:
                 if accelerator.is_main_process:
                     unwrapped_model = accelerator.unwrap_model(model)
-                    unwrapped_model.save_pretrained(f'{exp_args.save_dir}/ckpt_{global_i}',
-                                                    is_main_process=accelerator.is_main_process,
-                                                    save_function=accelerator.save,
-                                                    state_dict=accelerator.get_state_dict(model))
+                    unwrapped_model.save_pretrained(
+                        f"{exp_args.save_dir}/ckpt_{global_i}",
+                        is_main_process=accelerator.is_main_process,
+                        save_function=accelerator.save,
+                        state_dict=accelerator.get_state_dict(model)
+                    )
                     
-                    tokenizer.save_pretrained(f'{exp_args.save_dir}/ckpt_{global_i}')
-                    torch.save({'epoch': epoch, 'global_step': global_i}, f'{exp_args.save_dir}/ckpt_{global_i}/training_state.pt')
+                    tokenizer.save_pretrained(f"{exp_args.save_dir}/ckpt_{global_i}")
+                    torch.save({"epoch": epoch, "global_step": global_i}, f"{exp_args.save_dir}/ckpt_{global_i}/training_state.pt")
 
                 accelerator.wait_for_everyone()
 

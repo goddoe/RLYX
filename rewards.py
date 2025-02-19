@@ -1,8 +1,10 @@
 import re
-import numpy as np
+
 from math_verify import LatexExtractionConfig, parse, verify
 from latex2sympy2_extended import NormalizationConfig
+
 from utils import compare_numbers, extract_answer, extract_numbers
+
 
 def format_reward_func(completion, end_of_turn_token="<im_end>", **kwargs):
     def count_substring_and_calc_reward(substring, completion):
@@ -53,7 +55,8 @@ def math_reward_func(completion, solution, **kwargs):
             return 1.0
 
     # Reference : https://github.com/huggingface/open-r1/blob/1fc8d425a995ddf8dbc6f8ef239d8161acdb7fc1/src/open_r1/grpo.py#L53-L82C1
-    gold_parsed = parse(solution, extraction_mode="first_match", extraction_config=[LatexExtractionConfig()])
+    gold_parsed = parse(solution, extraction_mode="first_match",
+                        extraction_config=[LatexExtractionConfig()])
 
     if len(gold_parsed) != 0:
         # We require the answer to be provided in correct latex (no malformed operators)
