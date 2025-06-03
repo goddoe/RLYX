@@ -5,6 +5,7 @@ from copy import deepcopy
 import ray
 import yaml
 import torch
+import torch.nn.functional as F
 from ray.util.state import list_actors
 from ray.serve._private.common import RequestMetadata
 
@@ -104,66 +105,26 @@ def prepare_deepspeed(model, accelerator):
 
 
 def get_per_token_logps(model, input_ids, attention_mask, logits_to_keep):
+    """Calculate per-token log probabilities"""
+    outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+    logits = outputs.logits
 
-    # We add 1 to `logits_to_keep` because the last logits of the sequence is later excluded
-    logits = model(
-        input_ids=input_ids, attention_mask=attention_mask
-    ).logits  # (B, L, V)
+    # Shift logits and labels for next token prediction
+    logits = logits[:, :-1, :].contiguous()
+    labels = input_ids[:, 1:].contiguous()
 
-    # [batch_size, max_length, vocab_size]
-    logits = logits[:, -logits_to_keep:, :]  
-    input_ids = input_ids[:, -logits_to_keep:]
+    # Get the last logits_to_keep tokens
+    if logits_to_keep > 0:
+        logits = logits[:, -logits_to_keep:, :]
+        labels = labels[:, -logits_to_keep:]
 
-    # Compute the log probabilities for the input tokens. Use a loop to reduce memory peak.
-    # per_token_logps = []
-    # for logits_row, input_ids_row in zip(logits, input_ids[:, -logits_to_keep:]):
-    #     log_probs = logits_row.log_softmax(dim=-1)
-    #     token_log_prob = torch.gather(log_probs, dim=1, index=input_ids_row.unsqueeze(1)).squeeze(1)
-    #     per_token_logps.append(token_log_prob)
+    # Calculate log probabilities
+    log_probs = F.log_softmax(logits, dim=-1)
 
-    # return torch.stack(per_token_logps)
+    # Gather log probs for actual tokens
+    labels_expanded = labels.unsqueeze(-1)
+    per_token_logps = log_probs.gather(dim=-1, index=labels_expanded).squeeze(-1)
 
-    token_logits = logits.gather(dim=-1, index=input_ids.unsqueeze(-1)).squeeze(-1)
-    logsumexp_values = torch.stack([torch.logsumexp(lg, dim=-1)
-                                    for lg in logits])  # loop to reduce memory peak
-    token_log_probs = token_logits - logsumexp_values  # log_softmax = logits - log(sum(exp(logits)))
-    return token_log_probs
-
-
-def selective_log_softmax(logits, index):
-    """
-    A memory-efficient implementation of the common `log_softmax -> gather` operation.
-
-    This function is equivalent to the following naive implementation:
-    ```python
-    logps = torch.gather(logits.log_softmax(-1), dim=-1, index=index.unsqueeze(-1)).squeeze(-1)
-    ```
-
-    Args:
-        logits (`torch.Tensor`):
-            Logits tensor of shape `(..., num_classes)`.
-        index (`torch.Tensor`):
-            Index tensor of shape `(...)`, specifying the positions to gather from the log-softmax output.
-
-    Returns:
-        `torch.Tensor`:
-            Gathered log probabilities with the same shape as `index`.
-    """
-    if logits.dtype in [torch.float32, torch.float64]:
-        selected_logits = torch.gather(logits, dim=-1,
-                                       index=index.unsqueeze(-1)).squeeze(-1)
-        # loop to reduce peak mem consumption
-        logsumexp_values = torch.stack([torch.logsumexp(lg, dim=-1) for lg in logits])
-        per_token_logps = selected_logits - logsumexp_values  # log_softmax(x_i) = x_i - logsumexp(x)
-    else:
-        # logsumexp approach is unstable with bfloat16, fall back to slightly less efficent approach
-        per_token_logps = []
-        for row_logits, row_labels in zip(logits, index):  # loop to reduce peak mem consumption
-            row_logps = F.log_softmax(row_logits, dim=-1)
-            row_per_token_logps = (
-                row_logps.gather(dim=-1, index=row_labels.unsqueeze(-1)).squeeze(-1))
-            per_token_logps.append(row_per_token_logps)
-        per_token_logps = torch.stack(per_token_logps)
     return per_token_logps
 
 

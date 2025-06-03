@@ -276,7 +276,8 @@ def main():
     accelerator.print("Start training")
     for epoch in range(exp_args.num_train_epochs):
         for batch in train_dataloader:
-            context = nullcontext()
+            # context = nullcontext()
+            context = accelerator.accumulate(model)
             with context:
                 ###############################################################
                 # Rollout
@@ -391,8 +392,8 @@ def main():
 
                 # Working version... However, I have no idea why it works
                 # I think I need to multiply -1. to per_token_loss. Weird... 
-                per_token_loss = per_token_loss + exp_args.kl_coef * per_token_kl
-                # per_token_loss = -(per_token_loss - exp_args.kl_coef * per_token_kl)
+                # per_token_loss = per_token_loss + exp_args.kl_coef * per_token_kl
+                per_token_loss = -(per_token_loss - exp_args.kl_coef * per_token_kl)
 
                 # [batch_size * rollout_per_sample, max_length]
                 completion_attention_mask = (completion_ids != pad_token_id).view(batch_size* rollout_per_sample, -1).long() 
