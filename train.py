@@ -174,8 +174,11 @@ def main():
     ###############################################################
     # Prepare Model
     model = AutoModelForCausalLM.from_pretrained(exp_args.model_name_or_path)
-    ref_model = AutoModelForCausalLM.from_pretrained(exp_args.model_name_or_path)
-    ref_model.eval()
+
+    ref_model = None
+    if exp_args.kl_coef > 0.:
+        ref_model = AutoModelForCausalLM.from_pretrained(exp_args.model_name_or_path)
+        ref_model.eval()
 
 
     ###############################################################
@@ -214,10 +217,12 @@ def main():
         model, optimizer, train_dataloader, lr_scheduler
     )
 
-    if accelerator.state.deepspeed_plugin is None:
-        ref_model = accelerator.prepare_model(ref_model, evaluation_mode=True)
-    else:
-        ref_model = prepare_deepspeed(ref_model, accelerator)
+
+    if exp_args.kl_coef > 0.:
+        if accelerator.state.deepspeed_plugin is None:
+            ref_model = accelerator.prepare_model(ref_model, evaluation_mode=True)
+        else:
+            ref_model = prepare_deepspeed(ref_model, accelerator)
 
     ###############################################################
     # Prepare Reward function
@@ -366,14 +371,6 @@ def main():
                 # [batch_size, rollout_per_sample, max_length]
                 flatten_prompt_completion_attention_mask = (flatten_prompt_completion_ids != pad_token_id).view(batch_size* rollout_per_sample, -1).long()
 
-                # Calc KLD
-                with torch.no_grad():
-                    ref_per_token_logps = get_per_token_logps(
-                        ref_model,
-                        flatten_prompt_completion_ids,
-                        flatten_prompt_completion_attention_mask,
-                        logits_to_keep
-                    )
 
                 policy_per_token_logps = get_per_token_logps(
                     model,
@@ -382,17 +379,25 @@ def main():
                     logits_to_keep
                 )
 
-                # Compute the KL divergence between the model and the reference model
-                per_token_kl = torch.exp(ref_per_token_logps - policy_per_token_logps) - (ref_per_token_logps - policy_per_token_logps) - 1
+                per_token_kl = 0. 
+                if exp_args.kl_coef > 0.:
+                    # Calc KLD
+                    with torch.no_grad():
+                        ref_per_token_logps = get_per_token_logps(
+                            ref_model,
+                            flatten_prompt_completion_ids,
+                            flatten_prompt_completion_attention_mask,
+                            logits_to_keep
+                        )
+
+                    # Compute the KL divergence between the model and the reference model
+                    per_token_kl = torch.exp(ref_per_token_logps - policy_per_token_logps) - (ref_per_token_logps - policy_per_token_logps) - 1
 
                 # x - x.detach() allows for preserving gradients from x
                 # It is equivalent to updating the old policy model at every step.
                 # [batch_size * rollout_per_sample, max_length]
                 per_token_loss = torch.exp(policy_per_token_logps - policy_per_token_logps.detach()) * advantages.view(-1, 1)
 
-                # Working version... However, I have no idea why it works
-                # I think I need to multiply -1. to per_token_loss. Weird... 
-                # per_token_loss = per_token_loss + exp_args.kl_coef * per_token_kl
                 per_token_loss = -(per_token_loss - exp_args.kl_coef * per_token_kl)
 
                 # [batch_size * rollout_per_sample, max_length]
