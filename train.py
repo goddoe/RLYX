@@ -80,16 +80,27 @@ def main():
     tokenizer.chat_template = chat_template
 
     def tokenize_function(examples):
-        system_prompt = "A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant first thinks about the reasoning process in the mind and then provides the user with the answer. The reasoning process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think>\n<answer> answer here </answer>"
-        fewshot_question_1 = "Natalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May?"
-        fewshot_answer_1 = dedent("""
+        system_prompt = dedent("""
+        user와 assistant 간의 대화입니다.
+        - assistant는 <think></think> tag속에서 사용자의 질문에 대해 정리하고 생각의 과정을 거쳐 생각한 다음 사용자에게 답변을 제공합니다.
+        - 생각 과정과 답변은 각각 <think> </think> 태그와 <answer> </answer> 태그로 감싸집니다.
+
+        **예시**
+        ```
+        <im_start>user
+        Natalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May?
+        <im_end>
+        <im_start>assistant
         <think>
-        Natalia sold 48/2 = 24 clips in May.
-        Natalia sold 48+24 = 72 clips altogether in April and May.
+        나탈리아는 5월에 48 ÷ 2 = 24개의 클립을 팔았습니다.
+        따라서 4월과 5월에 총 48 + 24 = 72개의 클립을 팔았습니다.
         </think>
         <answer>
         72
-        </answer>""").strip()
+        </answer>
+        <im_end>
+        ```
+        """).strip()
         
         gold_answer_list = []
         
@@ -97,8 +108,6 @@ def main():
         for q, a in zip(examples["question"], examples["answer"]):
             new_messages = [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": fewshot_question_1},
-                {"role": "assistant", "content": fewshot_answer_1},
                 {"role": "user", "content": q}
             ]
             new_messages_list.append(new_messages)
