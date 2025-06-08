@@ -506,14 +506,11 @@ def main():
 
                 batch_result_list = []
                 
-                eval_sample = 30
                 for batch in valid_dataloader:
-                    if len(gold_list) > eval_sample:
-                        break
                     # inference
                     gold_list.extend(batch["gold_answer"])
 
-                    sample_params = {"temperature": 0.1,
+                    sample_params = {"temperature": 0.01,
                                      "max_tokens": exp_args.rollout_max_tokens,
                                      "n": 1,
                                      "include_stop_str_in_output": True,
@@ -541,8 +538,6 @@ def main():
                         for preds in policy_rollout_batch["text"]:
                             pred_raw_list.append(preds[0])
 
-                gold_list = gold_list[:eval_sample]
-                pred_raw_list = pred_raw_list[:eval_sample]
 
                 for pred_raw in pred_raw_list:
                     # extract answer from <answer> </answer> tag
@@ -567,8 +562,8 @@ def main():
                 within_tolerance_accuracy = n_within_tolerance_correct / n_total
 
                 metrics = {
-                    f"gsm8k_accuracy_exact_{eval_sample}s": exact_accuracy,
-                    f"gsm8k_accuracy_within_tolerance_{eval_sample}s": within_tolerance_accuracy,
+                    "gsm8k_accuracy_exact": exact_accuracy,
+                    "gsm8k_accuracy_within_tolerance": within_tolerance_accuracy,
                 }
                 
                 if is_wandb_logging:
@@ -580,8 +575,8 @@ def main():
 
                 accelerator.print(
                     f"global_step: {global_i}, epoch: {epoch}, "
-                    f"gsm8k_accuracy_exact_{eval_sample}s: {exact_accuracy:0.4f}, "
-                    f"gsm8k_accuracy_within_tolerance_{eval_sample}s: {within_tolerance_accuracy:0.4f}"
+                    f"gsm8k_accuracy_exact: {exact_accuracy:0.4f}, "
+                    f"gsm8k_accuracy_within_tolerance: {within_tolerance_accuracy:0.4f}"
                 )
 
             accelerator.wait_for_everyone()
