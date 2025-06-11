@@ -97,8 +97,7 @@ def main():
         </think>
         <answer>
         72
-        </answer>
-        <im_end>
+        </answer><im_end>
         ```
         """).strip()
         
@@ -251,7 +250,9 @@ def main():
     handle = serve.get_deployment_handle("InferenceWorker",
                                          app_name="default")
 
-    print(f"result: {handle.generate_text.remote(['hello']).result()}")
+    # print(f"result: {handle.generate_text.remote(['hello']).result()}")
+
+    accelerator.print("init weight update group")
 
     num_infer_workers = -1
     model_update_group = None
