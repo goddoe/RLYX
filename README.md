@@ -53,7 +53,7 @@ rlyx/
 
 ### GSM8K (Qwen2.5-0.5B)
 
-![Training Figures](res/imgs/Qwen2.5-0.5B_R1-Zero_Reproduction_20250703_2.png)
+![Training Figures](res/imgs/Qwen2.5-0.5B_R1-Zero_Reproduction_20250703.png)
 
 | Model | description | GSM8K |
 | --- | --- | --- |
