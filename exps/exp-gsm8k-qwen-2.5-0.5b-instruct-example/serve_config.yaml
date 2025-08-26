@@ -1,0 +1,18 @@
+applications:
+  - name: InferenceService
+    import_path: rlyx.infer_workers.default_vllm_worker:inference_app
+    route_prefix: /generate
+    runtime_env:
+      env_vars:
+        MODEL_NAME_OR_PATH: "Qwen/Qwen2.5-0.5B-Instruct"
+    deployments:
+      - name: InferenceWorker
+        num_replicas: 4
+        ray_actor_options:
+          num_gpus: 1
+          # accelerator_type: "V100"
+          # Alternative: use custom resource if GPU types are labeled
+          # resources: {"V100": 1}
+          # num_cpus: 8
+          # memory: 64000000000  # 64GB
+

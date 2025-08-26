@@ -7,7 +7,7 @@ from datasets import load_dataset
 from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer
 
-from utils import  extract_answer, extract_numbers, compare_numbers
+from rlyx.utils import extract_answer, extract_numbers, compare_numbers
 
 
 def prepare_tokenizer(model_name_or_path):

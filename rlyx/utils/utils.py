@@ -1,3 +1,13 @@
+__all__ = ["read_config",
+           "stateless_init_process_group",
+           "get_all_inference_actors",
+           "call_func_using_actor_handle",
+           "prepare_deepspeed",
+           "get_per_token_logps",
+           "create_keyword_mask_from_offsets",
+           "create_tool_response_mask",
+           ]
+
 import re
 import pickle
 from copy import deepcopy
@@ -158,44 +168,106 @@ def create_keyword_mask_from_offsets(tokenizer, input_texts, keywords):
     return mask
 
 
-def extract_numbers(text):
-    if text is None:
-        return []
+def create_tool_response_mask(tokenizer, completion_texts, completion_ids, pad_token_id):
+    """
+    Create mask for tool response blocks during training.
+    Tool responses (<|im_start|>tool ... <|im_end|>) will be masked (0).
+    Assistant responses will be kept (1).
     
-    text = text.replace(",", "")
-    numbers = re.findall(r"[-+]?\d*\.?\d+", text)
+    NOTE: This mask is for LABELS which are shifted by 1 position from input_ids.
+    When position i in input predicts position i+1, we mask position i+1 in labels.
+    
+    Args:
+        tokenizer: Tokenizer instance
+        completion_texts: List of completion text strings or single string
+        completion_ids: Tensor of token IDs [batch_size, seq_len] or list of lists
+        pad_token_id: Padding token ID
+        
+    Returns:
+        mask: Tensor with same shape as completion_ids where 1 = train, 0 = mask
+              This mask should be applied to SHIFTED labels (labels = input_ids[:, 1:])
+    """
+    import torch
+    
+    # Handle single string input
+    if isinstance(completion_texts, str):
+        completion_texts = [completion_texts]
+    
+    # Convert completion_ids to tensor if needed
+    if isinstance(completion_ids, list):
+        # Pad to same length if list of lists
+        if all(isinstance(item, list) for item in completion_ids):
+            max_len = max(len(ids) for ids in completion_ids)
+            padded_ids = []
+            for ids in completion_ids:
+                padded = ids + [pad_token_id] * (max_len - len(ids))
+                padded_ids.append(padded)
+            completion_ids = torch.tensor(padded_ids)
+        else:
+            completion_ids = torch.tensor(completion_ids).unsqueeze(0)
+    
+    batch_size, seq_len = completion_ids.shape
+    
+    # Initialize mask with 1s (keep all by default)
+    mask = torch.ones_like(completion_ids, dtype=torch.float32)
+    
+    # Tool response pattern
+    tool_start_pattern = r'<\|im_start\|>tool'
+    tool_end_pattern = r'<\|im_end\|>'
+    
+    # Process each completion text
+    for batch_idx, text in enumerate(completion_texts):
+        if not text:
+            continue
+            
+        # Find all tool response blocks
+        current_pos = 0
+        while True:
+            # Find start of tool response
+            start_match = re.search(tool_start_pattern, text[current_pos:])
+            if not start_match:
+                break
+            
+            tool_start = current_pos + start_match.start()
+            
+            # Find corresponding end
+            end_match = re.search(tool_end_pattern, text[tool_start:])
+            if not end_match:
+                break
+            
+            tool_end = tool_start + end_match.end()
+            
+            # Tokenize the prefix to find token positions
+            # This is approximate but should work for most cases
+            prefix_text = text[:tool_start]
+            tool_text = text[tool_start:tool_end]
+            
+            # Tokenize to get approximate token positions
+            prefix_tokens = tokenizer.encode(prefix_text, add_special_tokens=False)
+            tool_tokens = tokenizer.encode(tool_text, add_special_tokens=False)
+            
+            # Calculate token range for tool response
+            start_token_idx = len(prefix_tokens)
+            end_token_idx = start_token_idx + len(tool_tokens)
+            
+            # IMPORTANT: Shift mask by 1 for label alignment
+            # When input[i] predicts input[i+1], we mask label[i] which corresponds to input[i+1]
+            # So if tool response is at input[40:63], we mask labels[39:62]
+            # But since labels are already shifted (labels = input[1:]), 
+            # we need to mask positions [39:62] in the label mask which means [40-1:63-1]
+            if batch_idx < batch_size:
+                # Shift indices by -1 for label alignment
+                label_start = max(0, start_token_idx - 1)
+                label_end = min(seq_len, end_token_idx - 1)
+                if label_end > label_start:
+                    mask[batch_idx, label_start:label_end] = 0
+            
+            # Move to next potential tool response
+            current_pos = tool_end
+    
+    # Also mask padding tokens
+    padding_mask = (completion_ids == pad_token_id)
+    mask[padding_mask] = 0
+    
+    return mask
 
-    return [float(num) for num in numbers] if numbers else []
-
-
-def compare_numbers(pred, gold, tolerance=1e-5):
-    if not pred or not gold:
-        return {
-            "exact_match": False,
-            "within_tolerance": False,
-            "pred": pred,
-            "gold":gold
-        }
-
-    if isinstance(gold, str):
-        gold = gold.replace(",", "")
-    if isinstance(pred, str):
-        pred = pred.replace(",", "")
-
-    pred = float(pred)
-    gold = float(gold)
-
-    exact_match = pred == gold 
-    within_tolerance = abs(pred - gold) <= tolerance
-
-    return {
-        "exact_match": exact_match,
-        "within_tolerance": within_tolerance,
-        "pred": pred,
-        "gold":gold
-    }
-
-
-def extract_answer(text):
-    match = re.search(r"<answer>(.*?)</answer>", text, re.DOTALL)
-    return match.group(1) if match else None

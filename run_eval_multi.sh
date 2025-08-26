@@ -9,7 +9,7 @@ SAVE_PATH="./eval_outs/evaluation.jsonl"
 COMMANDS=()
 
 for ckpt in $(find "$BASE_DIR" -maxdepth 1 -type d -name "ckpt_*" | sort); do
-    COMMANDS+=("python evaluation.py --model_name_or_path \"$ckpt\" --output_path $SAVE_PATH")
+    COMMANDS+=("python -m rlyx.evaluation --model_name_or_path \"$ckpt\" --output_path $SAVE_PATH")
 done
 
 TOTAL_JOBS=${#COMMANDS[@]}

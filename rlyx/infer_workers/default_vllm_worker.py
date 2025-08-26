@@ -1,17 +1,20 @@
 import os
+import io
+import base64
 
 import torch
+import whisper
+import numpy as np
+import soundfile as sf
 from ray import serve
 from vllm import LLM, SamplingParams
 from vllm.worker.worker import Worker
 from starlette.requests import Request
 
-MODEL_NAME_OR_PATH = os.environ.get("MODEL_NAME_OR_PATH", "Qwen/Qwen2.5-0.5B")
 # MODEL_NAME_OR_PATH = os.environ.get("MODEL_NAME_OR_PATH", "Qwen/Qwen2.5-3B")
-# MODEL_NAME_OR_PATH = os.environ.get("MODEL_NAME_OR_PATH", "HuggingFaceTB/SmolLM2-360M")
+MODEL_NAME_OR_PATH = os.environ.get("MODEL_NAME_OR_PATH", "Qwen/Qwen2.5-0.5B")
 NUM_INFER_WORKERS = os.environ.get("NUM_INFER_WORKERS", 8)
 print(f"MODEL_NAME_OR_PATH: {MODEL_NAME_OR_PATH}")
-print(f"NUM_INFER_WORKERS: {NUM_INFER_WORKERS}")
 
 
 def stateless_init_process_group(master_address, master_port, rank, world_size,
@@ -65,7 +68,7 @@ class InferenceWorker:
         self.llm = LLM(model=MODEL_NAME_OR_PATH,
                        enforce_eager=True,
                        worker_cls=WrappedWorker,
-                       dtype="half"
+                       dtype="float32",# auto, half, bfloat16, or float32
                        )
         self.worker_id = os.getpid()
 
@@ -86,6 +89,10 @@ class InferenceWorker:
         if sample_params is None:
             sample_params = {'temperature': 0.7,
                              'max_tokens': 512,
+                             'include_stop_str_in_output': True,
+                             'skip_special_tokens': False,
+
+
                              'n': 4}
 
         outputs = self.llm.generate(prompts,
@@ -104,5 +111,5 @@ class InferenceWorker:
         results = self.generate_text(prompts)
         return results
 
-# Ray Serve App
+# Ray Serve Apps
 inference_app = InferenceWorker.bind()

@@ -10,9 +10,12 @@ class BaseArgs:
     wandb_entity: str = "default"
 
     # Dataset Args
-    dataset_name_or_path: str = "AI-MO/NuminaMath-TIR"
+    dataset_loader_name: str = "huggingface_loader"  # Dataset loader module
+    dataset_name_or_path: str = "AI-MO/NuminaMath-TIR"  # HF dataset name or file path
     tokenized_dataset_path: str = "./data/NuminaMath-TIR_tokenized"
     overwrite_preprocess: bool = False
+    train_size_limit: int = -1  # -1 means use all data
+    valid_size_limit: int = -1  # -1 means use all data
 
     # Preprocessing Args
     batch_size_for_preproc: int = 3000
@@ -20,6 +23,12 @@ class BaseArgs:
 
     # Model Args
     model_name_or_path: str = "HuggingFaceTB/SmolLM2-135M"
+    
+    # Experiment Module Args
+    chat_template_name: str = None  # None to use tokenizer's default template
+    tokenizer_function_name: str = "basic_tokenizer"
+    evaluator_name: str = "basic_evaluator"
+    reward_function_names: list = field(default_factory=lambda: ["format_reward"])
 
     # Training Args
     max_length: int = 1024
@@ -37,6 +46,7 @@ class BaseArgs:
     rollout_temperature: float = 1.0
     rollout_max_tokens: int = 512
     kl_coef: float = 0.01
+    stop_tokens: list = field(default_factory=lambda: ["<|im_end|>"])  # List of stop tokens for generation
 
     eval_interval: int = 500
     log_interval: int  = 100
