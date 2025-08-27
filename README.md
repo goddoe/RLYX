@@ -26,7 +26,7 @@ A **hackable, simple, and reseach-friendly** GRPO Training Framework with high s
 
 ```
 rlyx/
-├── registries.py          # Centralized registry system
+├── registries.py         # Centralized registry system
 ├── train.py              # Main training script
 ├── evaluation.py         # Model evaluation
 ├── infer_workers.py      # Inference workers with Ray Serve
@@ -54,6 +54,8 @@ rlyx/
 ### GSM8K (Qwen2.5-0.5B)
 
 ![Training Figures](res/imgs/Qwen2.5-0.5B_R1-Zero_Reproduction_20250703.png)
+
+![gsm8k_sample](res/imgs/gsm8k_sample.png)
 
 | Model | description | GSM8K |
 | --- | --- | --- |
