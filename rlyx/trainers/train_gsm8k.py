@@ -12,7 +12,6 @@ import wandb
 import numpy as np
 import torch
 import torch.distributed as dist
-import soundfile as sf
 from ray import serve
 from tqdm import tqdm
 from dotenv import load_dotenv
@@ -21,7 +20,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, AdamW, get_schedul
 from accelerate import Accelerator
 from accelerate.utils import DummyOptim, DummyScheduler
 from torch.utils.tensorboard import SummaryWriter
-from torch.utils.data import DataLoader, DistributedSampler, RandomSampler, SequentialSampler
+from torch.utils.data import DataLoader
 
 # Module registries
 from rlyx.registries import (
@@ -37,7 +36,6 @@ from rlyx.utils import \
     prepare_deepspeed, get_all_inference_actors, \
     call_func_using_actor_handle, stateless_init_process_group, \
     get_per_token_logps
-from rlyx.utils.transcribe_utils import cvt_audio_and_transcribe_completion, batch_cvt_audio_and_transcribe_completion
 
 load_dotenv()
 
@@ -393,6 +391,9 @@ def update_model_weights(accelerator, model, model_update_group):
     
     start_time = time.time()
     for name, param in state_dict.items():
+        if not param.is_cuda:
+            param = param.cuda()
+
         worker_update_weight_handle_list = []
         for i, actor_handle in enumerate(actor_handle_list):
             worker_update_weight_handle = call_func_using_actor_handle(
@@ -536,8 +537,17 @@ def main():
     num_processes = accelerator.num_processes
     accelerator.print("Number of processes (GPUs):", num_processes)
     
-    num_training_steps = math.ceil(len(tokenized_datasets["train"]) / (exp_args.train_batch_size_per_proc * num_processes)) * exp_args.num_train_epochs
+    num_update_per_epoch = math.ceil(len(train_dataloader) / accelerator.gradient_accumulation_steps)
+    num_training_steps = num_update_per_epoch * exp_args.num_train_epochs
+
+    # recalculate total training epoch
+    exp_args.num_train_epochs = math.ceil(num_training_steps / num_update_per_epoch)
+
     accelerator.print("Number of training steps:", num_training_steps)
+    accelerator.print("Number of training steps:", num_training_steps)
+    accelerator.print("Number of num_update_per_epoch:", num_update_per_epoch)
+    accelerator.print("Number of num_train_epochs", exp_args.num_train_epochs)
+
     
     optimizer, lr_scheduler = setup_optimizer_and_scheduler(
         model,
