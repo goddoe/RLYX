@@ -78,9 +78,6 @@ def setup_tokenizer(model_name_or_path, chat_template_name=None):
     return tokenizer
 
 
-
-
-
 def prepare_dataset(accelerator, dataset_name_or_path, dataset_loader_name, tokenized_dataset_path, 
                    overwrite_preprocess, batch_size_for_preproc, tokenizer, max_length, 
                    tokenizer_function_name, train_size_limit, valid_size_limit):
@@ -540,10 +537,6 @@ def main():
     num_update_per_epoch = math.ceil(len(train_dataloader) / accelerator.gradient_accumulation_steps)
     num_training_steps = num_update_per_epoch * exp_args.num_train_epochs
 
-    # recalculate total training epoch
-    exp_args.num_train_epochs = math.ceil(num_training_steps / num_update_per_epoch)
-
-    accelerator.print("Number of training steps:", num_training_steps)
     accelerator.print("Number of training steps:", num_training_steps)
     accelerator.print("Number of num_update_per_epoch:", num_update_per_epoch)
     accelerator.print("Number of num_train_epochs", exp_args.num_train_epochs)
@@ -561,6 +554,7 @@ def main():
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
     )
+
 
     if exp_args.kl_coef > 0.:
         if accelerator.state.deepspeed_plugin is None:

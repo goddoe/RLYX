@@ -4,7 +4,7 @@ exp_name: "rlyx-gsm8k-qwen-2.5-0.5b-base-example"
 logging_methods: ["wandb"]
 # logging_methods: ["tensorboard"]
 wandb_project: "rlyx-gsm8k-example"
-wandb_entity: "naver-clova"
+wandb_entity: "your_wandb_entity"  # set your wandb entity here
 
 # Dataset Args
 dataset_loader_name: "huggingface_loader"  # Dataset loader module
