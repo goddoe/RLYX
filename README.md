@@ -58,7 +58,7 @@ rlyx/
 | Model | description | GSM8K |
 | --- | --- | --- |
 | Qwen.2.5-0.5B  | Qwen2.5-0.5B baseline | 41.6 |
-| Qwen.2.5-0.5B-r1-zero-reproduction | r1-zero training with Qwen2.5-0.5B, limitted output length setting(max output length 500)| 47.99 |
+| Qwen.2.5-0.5B-r1-zero-reproduction | r1-zero training with Qwen2.5-0.5B, limitted output length setting(max output length 500)| 60.0 |
 
 
 ## Working Environment
